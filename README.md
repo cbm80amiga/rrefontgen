@@ -12,6 +12,13 @@ RRE fonts generator utility
   
   In this mode you should add your bitmap font header to *rrefontgen* source code, compile the tool and generate the font
   
-- fontName: name used in source code
-- fontMode: 0 - rectangles (default), 1 - vertical lines, 2 - horizozntal lines
+- fontName: struct name used in the source code
+- fontMode: 0 - rectangles (default), 1 - vertical lines, 2 - horizontal lines
 - overlap:  0 - no overlapping quads, 1 - old overlapping, 2 - less overlapping (default)
+
+### Examples: ###
+   `rrefontgen times.pbm 32 64 Times32x64`
+   
+   `rrefontgen times.pbm 32 64 Times32x64 1`
+   
+   `rrefontgen times.pbm 32 64 Times32x64 0 0`

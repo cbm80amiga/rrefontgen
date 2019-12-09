@@ -6,6 +6,11 @@ RRE fonts generator utility
   
   PBM file should be B&W, 1-bit. Typical file should contain 16x6 or 32x3 characters (96 characters mode) or 16x8 (256 characters)
   
+### Usage in XML/LCD mode:
+   ` rrefontgen [font.lcd] <fontName> <fontMode> <overlap>`
+  
+  Direct loader of GLCD Font Creator XML format
+  
 ### Usage in C header font mode:
 
    `rrefontgen <fontName> <fontMode> <overlap>`
@@ -22,3 +27,5 @@ RRE fonts generator utility
    `rrefontgen times.pbm 32 64 Times32x64 1`
    
    `rrefontgen times.pbm 32 64 Times32x64 0 0`
+   
+   `rrefontgen times.lcd Times32x64 0 2`

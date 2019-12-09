@@ -15,13 +15,19 @@
 // - more debug information
 // - decreased rectangle overlapping
 // - instead of .pbm files C header fonts can be converted too
+// - added loader for *.lcd xml fonts from GLCD Font Creator
 
 // Usage in PBM mode:
-//   rrefontgen [pbm file] [char w] [char h] <fontName> <fontMode> <overlap>
+//   rrefontgen [font.pbm] [char w] [char h] <fontName> <fontMode> <overlap>
+
+// Usage in LCD/XML mode:
+//   rrefontgen [font.lcd] <fontName> <fontMode> <overlap>
+
 // Usage in C header font mode:
 //   rrefontgen <fontName> <fontMode> <overlap>
-//    fontMode: 0 - rect, 1 - vert, 2 - horiz
-//    overlap:  0 - no overlapping quads, 1 - old overlapping, 2 - less overlapping (default)
+
+// fontMode: 0 - rect, 1 - vert, 2 - horiz
+// overlap:  0 - no overlapping quads, 1 - old overlapping, 2 - less overlapping (default)
 
 #include <stdio.h>
 #include <stdint.h>
@@ -31,14 +37,15 @@
 
 // -------------------------------------------------------------------
 
-// 1-PBM file, 0-src bitmap from header included below
-int pbmMode = 1;
+// 1-PBM file, 2-xml/lcd mode, 0-src bitmap from header included below
+int fileMode = 0;
 
 // 0-rect, 1-vert, 2-horiz
 int fontMode = 0;
 
 // 0-no overlapping quads, 1-old overlapping, 2-less overlapping (default)
 int overlap = 2;
+
 
 // dumps more debug info
 int debug = 1;
@@ -73,6 +80,14 @@ typedef unsigned char  uint8_t;
 //#include "bolddig13x20.h"
 //#include "c64_6x7.h"
 //#include "thin_5x7.h"
+//#include "font_arialdig72norm.h"
+///#include "font_arialdig150bold.h"
+//#include "font_arialbldig54bold.h"
+//#include "font_arialdig62bold.h"
+//#include "font_tahoma206x255.h"
+//#include "font_times80.h"
+//#include "kx16x26.h"
+//#include "kx9x14.h"
 
 const uint8_t *font = NULL;
 //const uint8_t *font = Tahoma77x77;
@@ -94,14 +109,23 @@ const uint8_t *font = NULL;
 //const uint8_t *font = Bold13x20;
 //const uint8_t *font = c64_6x7;
 //const uint8_t *font = thin_5x7;
+//const uint8_t *font = ( uint8_t *)Arial50x72n;
+///const uint8_t *font = ( uint8_t *)Arial174x228;
+//const uint8_t *font = ( uint8_t *)Arial_Black;
+//const uint8_t *font = ( uint8_t *)Arial62;
+//const uint8_t *font = Tahoma206x255;
+//const uint8_t *font = Times80;
+//const uint8_t *font = kx16x26;
+//const uint8_t *font = kx9x14;
 
 // -------------------------------------------------------------------
 
 int firstChar = 0, lastChar = 255; // initial for PBM or automatically set from header font
-char *fontName = "TempFont";  // set from command line
-char *fontModeTxt="0";
+const char *fontName = "TempFont";  // set from command line
+const char *fontModeTxt="0";
 int rectSize = 2;   // set automatically to 3 if wd,ht >16 or 4 if >64
 
+int fontMinX=0,fontMaxX=0,fontMinY=0,fontMaxY=0,fontW,fontH;
 int cw, ch;
 int w, h;
 int bytes;
@@ -109,10 +133,10 @@ uint8_t *buff;
 
 struct MRect { uint8_t x, y, w, h; };
 
-#define ECHARS 256
-#define MAX_RECTS_PER_CHAR 200
-uint16_t charOffs[ECHARS+1];
-struct MRect MRects[ECHARS*MAX_RECTS_PER_CHAR];
+#define MAX_CHARS 256
+#define MAX_RECTS_PER_CHAR 300
+uint16_t charOffs[MAX_CHARS+1];
+struct MRect MRects[MAX_CHARS*MAX_RECTS_PER_CHAR];
 int numRects = 0;
     
 int numRectPixelsTotal = 0;
@@ -120,14 +144,14 @@ int numPixelsTotal = 0;
 
 // -------------------------------------------------------------------
 
-int ReadPBMFile( const char *rn )
+int ReadPBMFile(const char *rn)
 {
   char ct[1024];
   int r;
   FILE * f = fopen( rn, "r" );
 
   if( !f ) {
-    fprintf( stderr, "Error: Cannot open file.\n" );
+    fprintf( stderr, "Error: Cannot open file '%s'.\n", rn );
     return -11;
   }
 
@@ -146,7 +170,7 @@ int ReadPBMFile( const char *rn )
   if(debug) printf("PBM: %dx%d\n",w,h);
   w=(w+7)&~7;
   bytes = (w*h)>>3;
-  buff = malloc( bytes );
+  buff = (uint8_t*)malloc( bytes );
   r = fread( buff, 1, bytes, f );
   if( r != bytes ) {
     fprintf( stderr, "Error: Ran into EOF when reading file.  (%d)\n",r  );
@@ -154,6 +178,97 @@ int ReadPBMFile( const char *rn )
   }
 
   fclose( f );
+  return 0;
+}
+
+// -------------------------------------------------------------------
+void calcCharSize(int ch, int *minx, int *maxx, int *miny, int *maxy)
+{
+  int x,y,offs=(ch-firstChar)*fontW*fontH;
+  for(y=0;y<fontH;y++)    for(x=0;x<fontW;x++) if(buff[offs+x+y*fontW]) { *miny=y; y=fontH; break;}
+  for(y=fontH-1;y>=0;y--) for(x=0;x<fontW;x++) if(buff[offs+x+y*fontW]) { *maxy=y; y=-1; break; }
+  for(x=0;x<fontW;x++)    for(y=0;y<fontH;y++) if(buff[offs+x+y*fontW]) { *minx=x; x=fontW; break; }
+  for(x=fontW-1;x>=0;x--) for(y=0;y<fontH;y++) if(buff[offs+x+y*fontW]) { *maxx=x; x=-1; break; }
+}
+
+// -------------------------------------------------------------------
+int ReadXMLFile(const char *rn)
+{
+  int r;
+  FILE *f = fopen( rn, "rb" );
+  if( !f ) {
+    fprintf( stderr, "Error: Cannot open file '%s'.\n", rn );
+    return -11;
+  }
+
+  fseek(f,0,SEEK_END);
+  int filesize = ftell(f);
+  fseek(f,0,SEEK_SET);
+
+  char *xml = (char*)malloc(filesize+1);
+  if(!xml) {
+    fprintf(stderr, "ERROR: Cannot allocate %d bytes\n",filesize);
+    exit(1);
+  }
+  long res = fread( xml, 1, filesize, f );
+  if( res != filesize ) {
+    fprintf(stderr, "ERROR: Read bytes %d!=%d\n",res,filesize);
+    return -5;
+  }
+  fclose(f);
+
+  *(xml+filesize) = 0;
+  char *p = xml;
+  while(*p && strncmp(p,"WIDTH=",6)) p++;
+  p+=7;
+  fontW=atoi(p);
+  while(*p && strncmp(p,"HEIGHT=",7)) p++;
+  p+=8;
+  fontH=atoi(p);
+  while(*p && strncmp(p," FROM=",6)) p++;
+  p+=7;
+  firstChar=atoi(p);
+  while(*p && strncmp(p," TO=",4)) p++;
+  p+=5;
+  lastChar=atoi(p);
+
+  fprintf(stderr,"LCD/XML: font %dx%d  loading chars %d to %d ...\n",fontW,fontH,firstChar,lastChar);
+  int numCh = lastChar-firstChar+1;
+  buff = (uint8_t*)malloc(fontW*fontH*numCh);
+  //memset(buff,0,fontW*fontH*numCh);
+  for(int c=0;c<numCh; c++) {
+    //fprintf(stderr, "[%d]\n",c+firstChar);
+    int offs = c*fontH*fontW;
+    while(p<xml+filesize && *p && strncmp(p," PIXELS=",8)) p++;
+    p+=9;
+    //printf("---ch=%d\n",c+firstChar);
+    for(int j=0;j<fontW;j++) {
+      for(int i=0;i<fontH;i++) {
+        buff[offs+i*fontW+j]=(atoi(p)?0:1);
+        //printf("%d",buff[offs+i*fontW+j]);
+        while(p<xml+filesize && *p && *p!=',' && *p!='\"') p++;
+        p++;
+      }
+      //printf("\n");
+    }
+  }
+  free(xml);
+
+  if(!optim) return 0;
+  
+  fontMinX=999,fontMaxX=0,fontMinY=999,fontMaxY=0;
+  int minX=999,maxX=0,minY=999,maxY=0;
+  for(int c=firstChar;c<=lastChar; c++) {
+    calcCharSize(c,&minX,&maxX,&minY,&maxY);
+    if(minX<fontMinX) fontMinX=minX;
+    if(maxX>fontMaxX) fontMaxX=maxX;
+    if(minY<fontMinY) fontMinY=minY;
+    if(maxY>fontMaxY) fontMaxY=maxY;
+  }
+  cw = fontMaxX-fontMinX+1;
+  ch = fontMaxY-fontMinY+1;
+  if(cw<0 || ch<0) { fprintf(stderr, "Wrong cw,ch [%d,%d]!\n",cw,ch); exit(1); } 
+  fprintf(stderr, "Optimized xml font: minx,miny=%d,%d cw,ch=%dx%d\n",fontMinX,fontMinY,cw,ch);
   return 0;
 }
 
@@ -269,6 +384,7 @@ int CoverH( uint8_t * ibuff, struct MRect * rs )
     }
   return cnt;
 }
+
 // -------------------------------------------------------------------
 int GreedyChar( int chr, struct MRect * RectSet )
 {
@@ -279,9 +395,9 @@ int GreedyChar( int chr, struct MRect * RectSet )
 
   for( i = 0; i < ch*cw; i++ ) cbuff[i] = rbuff[i] = 0;
   // copy char image to cbuff
-  if(pbmMode) {
+  if(fileMode==1) {
     // PBM mode
-    for( y = 0; y < ch; y++ )
+    for( y = 0; y < ch; y++ ) {
       for( x = 0; x < cw; x++ ) {
         int ppcx = w/cw;
         int xpos = ((chr-firstChar) % ppcx)*cw;
@@ -290,6 +406,13 @@ int GreedyChar( int chr, struct MRect * RectSet )
         int xbit = (xpos+x)&7;
         cbuff[x+y*cw] = (buff[idx]&(1<<(7-xbit)))?0:1;
       }
+    }
+  } else if(fileMode==2) {
+    // lcd/xml mode
+    int idx = (chr-firstChar)*fontW*fontH;
+    for( y = 0; y < ch; y++ )
+      for( x = 0; x < cw; x++ )
+        cbuff[x+y*cw] = buff[idx+(y+fontMinY)*fontW+x+fontMinX];
   } else {
     // font in header mode
     int ch8 = (ch+7)/8;
@@ -297,16 +420,15 @@ int GreedyChar( int chr, struct MRect * RectSet )
     for( x = 0; x < cw; x++ ) {
       for( y = 0; y < ch; y++ ) {
         int idx = x*ch8+y/8;
-        //printf("idx=%d font=%d\n",idx,b[idx]);
         int ybit = y&7;
             cbuff[x+y*cw] = (b[idx]&(1<<ybit))?1:0;
       }
     }
   }
-  if(invert) {
-    for( x = 0; x < cw; x++ )
-      for( y = 0; y < ch; y++ ) cbuff[x+y*cw] = cbuff[x+y*cw] ? 0 : 1;
-  }
+
+  if(invert)
+    for( x = 0; x < cw; x++ ) for( y = 0; y < ch; y++ ) cbuff[x+y*cw] = cbuff[x+y*cw] ? 0 : 1;
+
   //Greedily find the minimum # of rectangles that can cover this.
   switch(fontMode) {
     case 0: rectCount = CoverR( cbuff, RectSet ); break;
@@ -326,9 +448,9 @@ int GreedyChar( int chr, struct MRect * RectSet )
   if(debug) {
     printf( "=========================================================================\n");
     printf( "Char 0x%02x '%c' %d rects, %d pixels (%d overlapping), %d bytes (vs bmp %db)\n", chr, chr<32?'.':chr, rectCount, numRectPixels, numRectPixels-numPixels, rectCount*rectSize, cw*((ch+7)/8));
-    if(rectCount>0) printf( "\n  X  Y  W  H   [*]\n");
+    if(rectCount>0) printf( "\n   X   Y   W   H   [*]   Rect\n");
     for( i=0; i<rectCount; i++ )
-      printf( " %2d %2d %2d %2d   [%c] %2d\n", RectSet[i].x, RectSet[i].y, RectSet[i].w, RectSet[i].h, (i+1)<10 ? i+'1' : ((i-10+1)&0x3f)+'A', i);
+      printf( " %3d %3d %3d %3d   [%c] %3d\n", RectSet[i].x, RectSet[i].y, RectSet[i].w, RectSet[i].h, (i+1)<10 ? i+'1' : ((i-10+1)&0x3f)+'A', i);
 
     if(rectCount>0) {
       printf( "\nOverlap buffer / Rects\n" );
@@ -390,6 +512,7 @@ int optimize()
     cw = cwMax;
     ch = ymax-ymin+1;
   }
+  if(cw<0 || ch<0) { fprintf(stderr,"Wrong cw,ch=%d,%d!",cw,ch); exit(1); }
   if(debug) {
     printf("ymin = %3d for [0x%02x] '%c'\n",ymin,yminch,yminch);
     printf("ymax = %3d for [0x%02x] '%c'\n",ymax,ymaxch,ymaxch);
@@ -526,14 +649,29 @@ void DumpOffs16()
 }
 
 // -------------------------------------------------------------------
+void calcRectSize()
+{
+  if(fontMode==0) // rect mode
+    rectSize = (cw>16 || ch>16) ? ((cw>64 || ch>64) ? 4 : 3) : 2;
+  else if(fontMode==1)  // vertical lines
+    rectSize = (cw>64 || ch>32) ? ((cw>256 || ch>256) ? 4 : 3) : 2;
+  else // horizontal lines
+    rectSize = (cw>32 || ch>64) ? ((cw>256 || ch>256) ? 4 : 3) : 2;
+}
+
+// -------------------------------------------------------------------
 int main( int argc, char ** argv )
 {
   int r, i, x, y, j;
 
-  if(argc>4) pbmMode=1;
-  if(pbmMode) {
-    if( argc<4 ) {
-      fprintf( stderr, "Got %d args.\nUsage: rrefontgen [pbm file] [char w] [char h] <fontName> <fontMode> <overlap>\n", argc );
+  if(argc>1 && strlen(argv[1])>4) {
+    int slen = strlen(argv[1]);
+    if(strncmp(&argv[1][slen-4],".pbm",4)==0) fileMode=1; else
+    if(strncmp(&argv[1][slen-4],".lcd",4)==0) fileMode=2;
+  }
+  if(fileMode==1) {
+    if(argc<4) {
+      fprintf( stderr, "Got %d args.\nUsage: rrefontgen [font.pbm] [char w] [char h] <fontName> <fontMode> <overlap>\n", argc );
       return -1;
     }
     if((r = ReadPBMFile(argv[1]))) return r;
@@ -543,8 +681,18 @@ int main( int argc, char ** argv )
     if( argc>4 ) fontName = argv[4];
     if( argc>5 ) fontMode = atoi(argv[5]);
     if( argc>6 ) overlap = atoi(argv[6]);
+  } else if(fileMode==2) {
+    if(argc<2) {
+      fprintf( stderr, "Got %d args.\nUsage: rrefontgen [font.lcd] <fontName> <fontMode> <overlap>\n", argc );
+      return -1;
+    }
+    if((r = ReadXMLFile(argv[1]))) return r;
+    if( argc>2 ) fontName = argv[2];
+    if( argc>3 ) fontMode = atoi(argv[3]);
+    if( argc>4 ) overlap = atoi(argv[4]);
   } else {
-    cw = ((char*)font)[0]; if(cw<0) cw=-cw;
+    //cw = ((char*)font)[0]; if(cw<0) cw=-cw;
+    cw = font[0]; if(cw<0) cw=-cw;
     ch = font[1];
     firstChar = font[2];
     lastChar  = font[3];
@@ -554,22 +702,17 @@ int main( int argc, char ** argv )
     if( argc>3 ) overlap = atoi(argv[3]);
   }
 
-  if(fontMode==0)
-    rectSize = (cw>16 || ch>16) ? ((cw>64 || ch>64) ? 4 : 3) : 2;
-  else if(fontMode==1)
-    rectSize = (cw>64 || ch>32) ? ((cw>256 || ch>256) ? 4 : 3) : 2;
-  else
-    rectSize = (cw>32 || ch>64) ? ((cw>256 || ch>256) ? 4 : 3) : 2;
+  calcRectSize(); // for cw/ch before optimization
 
   if(debug) {
-    printf("pbmMode  = %d\n",pbmMode);
-    printf("fontMode = %d (0-rect,1-vert,2-horiz)\n",fontMode);
-    printf("overlap  = %d (0-none,1-normal,2-less/optimal)\n",overlap);
-    printf("optim    = %d (0-none,1-optimize wd/ht)\n",optim);
-    printf("rectSize = %d bytes/rect\n",rectSize);
-    printf("cw x ch  = %dx%d\n",cw,ch);
-    printf("firstChar,lastChar = 0x%02x to 0x%02x\n",firstChar,lastChar);
-    printf("fontName = [%s]\n\n",fontName);
+    printf("fileMode       = %d (0-header,1-pbm,2-xml)\n",fileMode);
+    printf("fontMode       = %d (0-rect,1-vert,2-horiz)\n",fontMode);
+    printf("overlap        = %d (0-none,1-normal,2-less/optimal)\n",overlap);
+    printf("optim          = %d (0-none,1-optimize wd/ht)\n",optim);
+    printf("orig cw x ch   = %dx%d\n",cw,ch);
+    printf("orig rectSize  = %d bytes/rect\n",rectSize);
+    printf("firstCh,lastCh = 0x%02x to 0x%02x\n",firstChar,lastChar);
+    printf("fontName       = [%s]\n\n",fontName);
   }
 
   //i = 'H';
@@ -581,6 +724,8 @@ int main( int argc, char ** argv )
   charOffs[i] = numRects;
 
   optimize();
+  calcRectSize(); // for cw/ch after optimization
+
   fprintf( stderr, "Total rects: %d\n", numRects );
 
   if(debug) printf( "----><--------><--------><--------><--------><--------><----\n\n" );
@@ -589,13 +734,13 @@ int main( int argc, char ** argv )
   printf( "#define __font_%s_h__\n\n", fontName );
 
   int numChars = lastChar-firstChar+1;
-  printf( "/*\n  *** Generated by rrefontgen ***\n" );
+  printf( "/*\n  *** Generated by rrefontgen by Pawel A. Hernik ***\n" );
   printf( "  Font:         [%s] %dx%d\n", fontName, cw,ch );
   printf( "  Total chars:  %d", numChars );
   if(firstChar>=0x20) printf( " ('%c' to ", firstChar ); else printf( " (0x%02x to ", firstChar );
   if(lastChar>=0x20 && lastChar<0x7f) printf( "'%c')\n", lastChar ); else printf( "0x%02x)\n", lastChar );
   printf( "  Total rects:  %d * %d bytes\n", numRects, rectSize );
-  printf( "  Total pixels: %d (%d overlapping)\n", numRectPixelsTotal, numRectPixelsTotal-numPixelsTotal);
+  printf( "  Total pixels: %d (%d overlapping)\n", numRectPixelsTotal, numRectPixelsTotal-numPixelsTotal );
   printf( "  Total bytes:  %d (%d rects + %d offs)\n", numRects*rectSize+numChars*2, numRects*rectSize, numChars*2 );
   printf( "  Bitmap size:  %d (%dx%d * %d) (+%d opt)\n*/\n\n",  numChars*cw*((ch+7)/8), cw,ch,numChars,numChars );
   

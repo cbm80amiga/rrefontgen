@@ -1,6 +1,6 @@
 // RRE Font generator
 // Converter for .pbm or C header fonts into compressed RREs
-// (c) 20017-19 Pawel A. Hernik
+// (c) 20017-21 Pawel A. Hernik
 // based on Charles Lohr fonter util
 
 // Recent improvements:
@@ -16,18 +16,21 @@
 // - decreased rectangle overlapping
 // - instead of .pbm files C header fonts can be converted too
 // - added loader for *.lcd xml fonts from GLCD Font Creator
+// - <optim> added for command line
+// - PBM mode for digits (1 line only)
 
 // Usage in PBM mode:
-//   rrefontgen [font.pbm] [char w] [char h] <fontName> <fontMode> <overlap>
+//   rrefontgen [font.pbm] [char w] [char h] <fontName> <fontMode> <overlap> <optim>
 
 // Usage in LCD/XML mode:
-//   rrefontgen [font.lcd] <fontName> <fontMode> <overlap>
+//   rrefontgen [font.lcd] <fontName> <fontMode> <overlap> <optim>
 
 // Usage in C header font mode:
-//   rrefontgen <fontName> <fontMode> <overlap>
+//   rrefontgen <fontName> <fontMode> <overlap> <optim>
 
 // fontMode: 0 - rect, 1 - vert, 2 - horiz
 // overlap:  0 - no overlapping quads, 1 - old overlapping, 2 - less overlapping (default)
+// optim:    1 - remove empty columns and lines (left/top)
 
 #include <stdio.h>
 #include <stdint.h>
@@ -46,13 +49,13 @@ int fontMode = 0;
 // 0-no overlapping quads, 1-old overlapping, 2-less overlapping (default)
 int overlap = 2;
 
-
-// dumps more debug info
-int debug = 1;
-
 // remove empty columns before left edge of all chars
 // move all chars up if there is empty space on the top of entire set
 int optim = 1;
+
+
+// dumps more debug info
+int debug = 1;
 
 // invert char bitmap
 int invert = 0;
@@ -122,7 +125,7 @@ const uint8_t *font = NULL;
 
 int firstChar = 0, lastChar = 255; // initial for PBM or automatically set from header font
 const char *fontName = "TempFont";  // set from command line
-const char *fontModeTxt="0";
+const char *fontModeTxt = "0";
 int rectSize = 2;   // set automatically to 3 if wd,ht >16 or 4 if >64
 
 int fontMinX=0,fontMaxX=0,fontMinY=0,fontMaxY=0,fontW,fontH;
@@ -254,7 +257,14 @@ int ReadXMLFile(const char *rn)
   }
   free(xml);
 
-  if(!optim) return 0;
+  if(!optim) {
+    cw = fontW;
+    ch = fontH;
+    fontMinX = fontMinY = 0;
+    if(cw<0 || ch<0) { fprintf(stderr, "Wrong cw,ch [%d,%d]!\n",cw,ch); exit(1); } 
+    fprintf(stderr, "Non-Optimized xml font: cw,ch=%dx%d\n",cw,ch);
+    return 0;
+  }
   
   fontMinX=999,fontMaxX=0,fontMinY=999,fontMaxY=0;
   int minX=999,maxX=0,minY=999,maxY=0;
@@ -677,10 +687,14 @@ int main( int argc, char ** argv )
     if((r = ReadPBMFile(argv[1]))) return r;
     cw = atoi( argv[2] );
     ch = atoi( argv[3] );
-    if((w/cw) * (h/ch) < 256) { firstChar=32; lastChar=(w/cw)*(h/ch)+32-1; }  // ascii only mode
+    if((w/cw) * (h/ch) < 256) {
+       if(h/ch==1) { firstChar='0'; lastChar='0'+(w/cw)-1; } // only digits 0..9
+       else        { firstChar=32; lastChar=(w/cw)*(h/ch)+32-1; } // ascii only mode, 64 chars
+    }  
     if( argc>4 ) fontName = argv[4];
     if( argc>5 ) fontMode = atoi(argv[5]);
     if( argc>6 ) overlap = atoi(argv[6]);
+    if( argc>7 ) optim = atoi(argv[7]);
   } else if(fileMode==2) {
     if(argc<2) {
       fprintf( stderr, "Got %d args.\nUsage: rrefontgen [font.lcd] <fontName> <fontMode> <overlap>\n", argc );
@@ -690,7 +704,12 @@ int main( int argc, char ** argv )
     if( argc>2 ) fontName = argv[2];
     if( argc>3 ) fontMode = atoi(argv[3]);
     if( argc>4 ) overlap = atoi(argv[4]);
+    if( argc>5 ) optim = atoi(argv[5]);
   } else {
+    if(!font) { 
+      fprintf( stderr, "Font not defined!\n" );
+      return -1;
+    }
     //cw = ((char*)font)[0]; if(cw<0) cw=-cw;
     cw = font[0]; if(cw<0) cw=-cw;
     ch = font[1];
@@ -700,6 +719,7 @@ int main( int argc, char ** argv )
     if( argc>1 ) fontName = argv[1];
     if( argc>2 ) fontMode = atoi(argv[2]);
     if( argc>3 ) overlap = atoi(argv[3]);
+    if( argc>4 ) optim = atoi(argv[4]);
   }
 
   calcRectSize(); // for cw/ch before optimization

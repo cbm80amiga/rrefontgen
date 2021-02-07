@@ -4,7 +4,7 @@ RRE fonts generator utility
 ### Usage in PBM mode:
    ` rrefontgen [pbm file] [char w] [char h] <fontName> <fontMode> <overlap> <optim>`
   
-  PBM file should be B&W, 1-bit. Typical file should contain 16x6 or 32x3 characters (96 characters mode) or 16x8 (256 characters)
+  PBM file should be B&W, 1-bit. The file should contain 16x6 or 32x3 characters (96 characters mode), 16x8 (128 characters) or 1 line for digits and following characters
   
 ### Usage in XML/LCD mode:
    ` rrefontgen [font.lcd] <fontName> <fontMode> <overlap>  <optim>`
